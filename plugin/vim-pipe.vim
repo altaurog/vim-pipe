@@ -1,5 +1,21 @@
 nnoremap <silent> <LocalLeader>r :call <SID>VimPipe()<CR>
 
+function Exit_cb(vimpipe_buffer, start, exit_status)
+	let l:curr_buff = bufnr("%")
+	if win_gotoid(bufwinid(a:vimpipe_buffer))
+		silent! execute ":1d _"
+		" Display exit statys
+		silent call append(0, ["# Exit status: " . a:exit_status, ""])
+		" Display execution time
+		let l:duration = printf("%.2f", reltimefloat(reltime(a:start)))
+		silent call append(0, "# Pipe command took: " . l:duration . "s")
+		" Add the how-to-close shortcut.
+		let l:leader = exists("g:maplocalleader") ? g:maplocalleader : "\\"
+		silent call append(0, "# Use " . l:leader . "p to close this buffer.")
+	endif
+	call win_gotoid(bufwinid(l:curr_buff))
+endfunction
+
 function! s:VimPipe() " {
 	" Save local settings.
 	let saved_unnamed_register = @@
@@ -50,7 +66,7 @@ function! s:VimPipe() " {
 	redraw
 
 	" Clear the buffer.
-	execute ":%d _"
+ 	execute ":2,$d _"
 
 	" Lookup the vimpipe command, either from here or a parent.
 	if exists("b:vimpipe_command")
@@ -63,18 +79,18 @@ function! s:VimPipe() " {
 	if empty(l:vimpipe_command)
 		silent call append(0, ["", "# See :help vim-pipe for setup advice."])
 	else
-		let l:parent_contents = getbufline(l:parent_buffer, 0, "$")
-		call append(line('0'), l:parent_contents)
-
-		let l:start = reltime()
-		silent execute ":%!" . l:vimpipe_command
-		let l:duration = reltimestr(reltime(start))
-		silent call append(0, ["# Pipe command took:" . duration . "s", ""])
+		let start = reltime()
+		let Cb = {es -> "call Exit_cb(" . vimpipe_buffer . ", " . string(start) . ", " . es . ")"}
+		let pipe_options = {
+					\ "in_io": "buffer",
+					\ "in_buf": l:parent_buffer,
+					\ "out_io": "buffer",
+					\ "out_buf": vimpipe_buffer,
+					\ "err_io": "out",
+					\ "exit_cb": {job, exit_status -> execute(Cb(exit_status))}
+					\ }
+		let l:vimpipe_job = job_start(l:vimpipe_command, l:pipe_options)
 	endif
-
-	" Add the how-to-close shortcut.
-	let leader = exists("g:maplocalleader") ? g:maplocalleader : "\\"
-	silent call append(0, "# Use " . leader . "p to close this buffer.")
 
 	" Go back to the last window.
 	if exists("l:parent_was_active")
